@@ -260,11 +260,17 @@ def probe_thermal_zones(root: Path = Path("/")) -> dict[str, Any]:
     
     zones = []
     for zone_dir in sorted(base.glob("thermal_zone*")):
-        temp_raw = read_text(root, f"sys/class/thermal/{zone_dir.name}/temp")
-        ztype = read_text(root, f"sys/class/thermal/{zone_dir.name}/type")
+        try: 
+            temp_raw = read_text(root, f"sys/class/thermal/{zone_dir.name}/temp")
+        except TypeError: 
+            continue
         if temp_raw is None:
             continue
-        temp_c = int(temp_raw) / 1000
+        try:
+            temp_c = int(temp_raw) / 1000
+        except ValueError: 
+            continue
+        ztype = read_text(root, f"sys/class/thermal/{zone_dir.name}/type")
         zones.append({"zone":zone_dir.name, "type": ztype, "temp_c": temp_c})
     
     if not zones:
