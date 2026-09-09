@@ -98,13 +98,11 @@ def probe_module_model(root: Path = Path("/")) -> dict[str, Any]:
     not from anything installed afterwards.
     """
 
-    # TODO: implement this probe.
-    # Read /proc/device-tree/model with the read_text helper.
-    # That node is NUL-terminated; read_text already strips it for you.
-    # Return {'value': <the string>, 'source': src, 'status': 'ok'},
-    # or unknown(src, <why>) if the node is not there.
     src = "/proc/device-tree/model"
-    raise NotImplementedError("probes.probe_module_model")
+    model = read_text(root, src)
+    if model is None:
+        return unknown(src, "device-tree model not readable")
+    return {"value": model, "source": src, "status": "ok"}
 
 
 def probe_memory_total_kb(root: Path = Path("/")) -> dict[str, Any]:
@@ -116,12 +114,16 @@ def probe_memory_total_kb(root: Path = Path("/")) -> dict[str, Any]:
     their report rather than round it up.
     """
 
-    # TODO: implement this probe.
-    # Read /proc/meminfo and find the MemTotal line.
-    # Anchor your match to the start of a line, and return an int of kB,
-    # not the string and not the whole line.
     src = "/proc/meminfo"
-    raise NotImplementedError("probes.probe_memory_total_kb")
+    model = read_text(root, src)
+    if model is None:
+        return unknown(src, "/proc/meminfo not readable")
+    m = re.search("^rMemTotal:\s+(\d+)", model, re.MULTILINE)
+    if m is None: 
+        return unknown(src, "MemTotal not found in /proc/meminfo") 
+    return {"value": int(m.group(1)), "source": src, "status": "ok"}
+
+    
 
 
 def probe_root_source(root: Path = Path("/")) -> dict[str, Any]:
@@ -147,8 +149,26 @@ def probe_root_source(root: Path = Path("/")) -> dict[str, Any]:
     #     'other'              anything else, e.g. a tmpfs or NFS root
     # The 'kind' field is what the verdict in report.py branches on.
     src = "/proc/mounts"
-    raise NotImplementedError("probes.probe_root_source")
+    model = read_text(root, src)
+    if model is None:
+        return unknown(src, "/proc/mounts not readable")
+    for line in model.splitlines():
+        fields = line.split()
+        if len(fields) < 2:
+            continue
+        if fields[1] == "/":
+            device = fields[0]
+            if device.startswith(("/dev/mmcblk", "/dev/sd")):
+                kind = "removable_or_sata"
+            elif device.startswith("/dev/nvme"):
+                kind = "nvme"
+            else:
+                kind = "other"
+            return {"value": device, "kind": kind, "source": src, "status": "ok"}
+    return unknown(src, "no line with mountpoint / in /proc/mounts")
 
+
+    
 
 def probe_nvme_present(root: Path = Path("/")) -> dict[str, Any]:
     """Is there an NVMe device visible as a block device at all?
@@ -167,7 +187,12 @@ def probe_nvme_present(root: Path = Path("/")) -> dict[str, Any]:
     # Return 'value' as a bool, plus 'model' from
     # /sys/block/nvme0n1/device/model if you can read it, else None.
     src = "/sys/block/nvme0n1"
-    raise NotImplementedError("probes.probe_nvme_present")
+    base = Path(root) / "sys/block/nvme0n1"
+    present = base.exists()
+    model = read_text(root, "sys/block/nvme0n1/device/model")
+    return {"value": present, "model": model, "source": src, "status": "ok"}
+    
+    
 
 
 # LnkSta/LnkCap lines look like:
@@ -193,7 +218,15 @@ def _parse_link_line(line: str) -> dict[str, Any]:
     # _SPEED_RE and _WIDTH_RE above already match them.
     # Return {'raw', 'gts', 'width', 'gen'} — map GT/s to a generation with
     # _GEN_BY_GTS, and use None for anything the line does not state.
-    raise NotImplementedError("probes._parse_link_line")
+    gs = _SPEED_RE.search(line)
+    gw = _WIDTH_RE.search(line)
+
+    gts = float(gs.group(1)) if gs else None
+    width = int(gw.group(1)) if gw else None
+    gen = _GEN_BY_GTS.get(gts) if gts is not None else None
+    
+    return {"raw": line, "gts": gts, "width": width, "gen": gen}
+
 
 
 def probe_pcie_link(root: Path = Path("/"), lspci_output: str | None = None) -> dict[str, Any]:
@@ -222,7 +255,29 @@ def probe_pcie_link(root: Path = Path("/"), lspci_output: str | None = None) -> 
     # full capability.
     src = "lspci -vv"
     text = lspci_output if lspci_output is not None else run(["lspci", "-vv"])
-    raise NotImplementedError("probes.probe_pcie_link")
+    
+    if not text:
+        return unknown(src, "Data is empty!")
+
+    
+    negotiated = None
+    capability = None
+    for line in text.splitlines():
+        if "LnkSta:" in line:
+            negotiated = _parse_link_line(line)
+        elif "LnkCap:" in line: 
+            capability = _parse_link_line(line)
+    
+    
+    result = {"negotiated": negotiated, "capability": capability, "source": src, "status": "ok"}
+
+    
+    if negotiated and capability and negotiated["gen"] is not None and capability["gen"] is not None:
+        if negotiated["gen"] < capability["gen"]:
+            result["interpretation"] = "Gen4 drive negotiated Gen3, limited by the slot"
+        else:
+            result["interpretation"] = "Running at full capability"
+    return result
 
 
 def probe_thermal_zones(root: Path = Path("/")) -> dict[str, Any]:
@@ -244,7 +299,24 @@ def probe_thermal_zones(root: Path = Path("/")) -> dict[str, Any]:
     # unknown — and neither of them is 0.0.
     src = "/sys/class/thermal/thermal_zone*/temp"
     base = Path(root) / "sys/class/thermal"
-    raise NotImplementedError("probes.probe_thermal_zones")
+
+    if not base.exists():
+        return unknown(src, "No thermal directory")
+    
+    zones = []
+    for zone_dir in sorted(base.glob("thermal_zone*")):
+        temp_raw = read_text(root, f"sys/class/thermal/{zone_dir.name}/temp")
+        ztype = read_text(root, f"sys/class/thermal/{zone_dir.name}/type")
+        if temp_raw is None:
+            continue
+        temp_c = int(temp_raw) / 1000
+        zones.append({"zone":zone_dir.name, "type": ztype, "temp_c": temp_c})
+    
+    if not zones:
+        return unknown(src, "Thermal directory present but no zone reported a temperature")
+    hottest = max(z["temp_c"] for z in zones)
+    return {"value": hottest, "zones": zones, "source": src, "status": "ok"}
+    
 
 
 def probe_power_mode(root: Path = Path("/"), nvpmodel_output: str | None = None) -> dict[str, Any]:
@@ -264,4 +336,17 @@ def probe_power_mode(root: Path = Path("/"), nvpmodel_output: str | None = None)
     # unknown with a reason, not a crash.
     src = "nvpmodel -q"
     text = nvpmodel_output if nvpmodel_output is not None else run(["nvpmodel", "-q"])
-    raise NotImplementedError("probes.probe_power_mode")
+
+    if not text: 
+        return unknown(src, "nvpmodel absent/no output")
+    name = None
+    mode_id = None
+    for line in text.splitlines():
+        if "NV Power Mode:" in line:
+            name = line.split(":", 1)[1].strip()
+        elif line.strip().isdigit():
+            mode_id = int(line.strip())
+    if name is None:
+        return unknown(src, "No 'NV Power Mode:' line in nvpmodel output")
+    return {"value": name, "mode_id": mode_id, "source": src, "status": "ok"}
+    
