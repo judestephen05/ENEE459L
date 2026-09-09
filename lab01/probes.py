@@ -143,7 +143,13 @@ def probe_memory_total_kb(root: Path = Path("/")) -> dict[str, Any]:
     ever sees the pool. Students are expected to notice and to explain it in
     their report rather than round it up.
     """
-    
+    src = "/proc/meminfo"
+    model = read_text(root, src)
+    if not model:
+        return unknown(src, "/proc/meminfo not readable")
+    m = re.search(r"^MemTotal:\s+(\d+)\s*kB", model, re.MULTILINE)
+    if not m: 
+        return unknown(src, "MemTotal not found in /proc/meminfo") 
     return {"value": int(m.group(1)), "source": src, "status": "ok"}
 
 
@@ -159,7 +165,23 @@ def probe_root_source(root: Path = Path("/")) -> dict[str, Any]:
     /proc/mounts is preferred over `findmnt` because it needs no external
     binary and no elevation, and because it is what findmnt reads anyway.
     """
-    
+    src = "/proc/mounts"
+    model = read_text(root, src)
+    if model is None:
+        return unknown(src, "/proc/mounts not readable")
+    for line in model.splitlines():
+        fields = line.split()
+        if len(fields) < 2:
+            continue
+        if fields[1] == "/":
+            device = fields[0]
+            if device.startswith(("/dev/mmcblk", "/dev/sd")):
+                kind = "removable_or_sata"
+            elif device.startswith("/dev/nvme"):
+                kind = "nvme"
+            else:
+                kind = "other"
+            return {"value": device, "kind": kind, "source": src, "status": "ok"}
     return unknown(src, "no root mount entry found in mount table")
 
 
@@ -171,11 +193,14 @@ def probe_nvme_present(root: Path = Path("/")) -> dict[str, Any]:
     is what lets the troubleshooting tree in the lab guide send a student to
     the right branch.
     """
-    
+    src = "/sys/block/nvme0n1"
+    base = Path(root) / "sys/block/nvme0n1"
+    present = base.exists()
+    model = read_text(root, "sys/block/nvme0n1/device/model")
     return {
-        "value": ,
-        "model": ,
-        "source": ,
+        "value": present,
+        "model": model,
+        "source": src,
         "status": "ok",
     }
 
@@ -191,15 +216,32 @@ def probe_pcie_link(root: Path = Path("/"), lspci_output: str | None = None) -> 
     `lspci_output` exists so the tests can drive this without root or hardware.
     In normal use it is None and the probe shells out.
     """
-        
-    return {
-        "value":,
-        "negotiated": ,
-        "capability": ,
-        "interpretation": ,
-        "source": ,
-        "status": "ok",
-    }
+    src = "lspci -vv"
+    text = lspci_output if lspci_output is not None else run(["lspci", "-vv"])
+    
+    if not text:
+        return unknown(src, "Data is empty!")
+
+    
+    negotiated = None
+    capability = None
+    for line in text.splitlines():
+        if "LnkSta:" in line:
+            negotiated = _parse_link_line(line)
+        elif "LnkCap:" in line: 
+            capability = _parse_link_line(line)
+    
+    
+    result = {"value": negotiated["gen"] if negotiated else None,"negotiated": negotiated, "capability": capability, "source": src, "status": "ok"}
+
+    
+    if negotiated and capability and negotiated["gen"] is not None and capability["gen"] is not None:
+        if negotiated["gen"] < capability["gen"]:
+            result["interpretation"] = "Gen4 drive negotiated Gen3, limited by the slot"
+        else:
+            result["interpretation"] = "Running at full capability"
+    return result    
+    
 
 
 def probe_thermal_zones(root: Path = Path("/")) -> dict[str, Any]:
@@ -210,10 +252,28 @@ def probe_thermal_zones(root: Path = Path("/")) -> dict[str, Any]:
     than once, and it is a good, cheap lesson in reading units before reading
     numbers.
     """
+    src = "/sys/class/thermal/thermal_zone*/temp"
+    base = Path(root) / "sys/class/thermal"
+
+    if not base.exists():
+        return unknown(src, "No thermal directory")
+    
+    zones = []
+    for zone_dir in sorted(base.glob("thermal_zone*")):
+        temp_raw = read_text(root, f"sys/class/thermal/{zone_dir.name}/temp")
+        ztype = read_text(root, f"sys/class/thermal/{zone_dir.name}/type")
+        if temp_raw is None:
+            continue
+        temp_c = int(temp_raw) / 1000
+        zones.append({"zone":zone_dir.name, "type": ztype, "temp_c": temp_c})
+    
+    if not zones:
+        return unknown(src, "Thermal directory present but no zone reported a temperature")
+    hottest = max(z["temp_c"] for z in zones)
     return {
-        "value": ,
-        "zones": ,
-        "source": ,
+        "value": hottest,
+        "zones": zones,
+        "source": src,
         "status": "ok",
     }
 
@@ -226,10 +286,24 @@ def probe_power_mode(root: Path = Path("/"), nvpmodel_output: str | None = None)
     same model are usually reporting different power modes, and without this
     field there is no way to find that out after the fact.
     """
+    src = "nvpmodel -q"
+    text = nvpmodel_output if nvpmodel_output is not None else run(["nvpmodel", "-q"])
+
+    if not text: 
+        return unknown(src, "nvpmodel absent/no output")
+    name = None
+    mode_id = None
+    for line in text.splitlines():
+        if "NV Power Mode:" in line:
+            name = line.split(":", 1)[1].strip()
+        elif line.strip().isdigit():
+            mode_id = int(line.strip())
+    if name is None:
+        return unknown(src, "No 'NV Power Mode:' line in nvpmodel output")
     return {
-        "value": ,
-        "mode_id": ,
-        "source": ,
+        "value": name,
+        "mode_id": mode_id,
+        "source": src,
         "status": "ok",
     }
 
