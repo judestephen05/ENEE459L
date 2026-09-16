@@ -68,7 +68,8 @@ def probe_torch(env: Env) -> dict[str, Any]:
         "version": version, 
         "cuda_available": cuda_available, 
         "cuda_version": getattr_path(torch, "version.cuda"), 
-        "device_name": device}
+        "device_name": device
+        }
 
     if not raw:
         result["detail"] = "torch imported but exposes no __version__"
@@ -90,31 +91,119 @@ def probe_torch(env: Env) -> dict[str, Any]:
     
 
 
-
 def probe_cuda(env: Env) -> dict[str, Any]:
-    #write your code here
-    pass
+    src = "/usr/local/cuda/version.json"
+
+    raw = read_text(env.root, src)
+    if not raw:
+        return unknown(src, "CUDA toolkit manifest absent - no toolkit installed at /usr/local/cuda")
+    
+    try:
+        data = json.loads(raw)
+    except (ValueError, json.JSONDecodeError):
+        return unknown(src, "CUDA toolkit manifest is present but not valid JSON")
+    
+    version = data.get("cuda",{}).get("version")
+
+    if not version:
+        return unknown(src, "manifest present but names no cuda version")
+    
+    result = {
+        "value": raw,
+        "source": src,
+        "status": "ok",
+        "line": major_minor(version)
+        }
+    return result
+
 
 
 def probe_opencv(env: Env) -> dict[str, Any]:
-    #write your code here
-    pass
+    src = "import cv2"
+
+    try:
+        cv2 = env.importer("cv2")
+    except ModuleNotAvailable as e: 
+        return unknown(src, f"cv2 is not importable:  {e}")
+    
+    raw = getattr_path(cv2, "__version__")
+
+    counter = getattr_path(cv2, "cuda.getCudaEnableDeviceCount")
+    if callable(counter):
+        devices = int(counter())
+        cuda_devices = devices
+        if devices !=0:
+            detail = f"built with CUDA, {devices} device(s) visible" 
+        else:
+            detail = "the cv2.cuda namespace exists but reports no devices - this is a non-CUDA build"
+    else:
+        cuda_devices = None
+        detail = "no cv2.cuda namespace - a non-CUDA build, which is what JetPack ships"
+    
+    result = {
+        "value": raw,
+        "source": src,
+        "status": "ok" if raw else "unknown",
+        "cuda_devices": cuda_devices,
+        "cuda_enabled": bool(cuda_devices),
+        "detail": detail
+    }
+    return result
 
 
 def probe_tensorrt(env: Env) -> dict[str, Any]:
-    # write your code here
-    pass
+    src = "import tensorrt"
+
+    try:
+        trt = env.importer("tensorrt")
+    except ModuleNotAvailable as e: 
+        hint = ""
+        if env.python.prefix and env.python.prefix !=env.python.base_prefix:
+            hint = " - you are inside a virtual environment, and TensorRT is a system package that a venv made without -system-site-packages cannot see"
+        return unknown(src, f"tensorrt is not importable:  {e}{hint}")
+    
+    raw = getattr_path(trt, "__version__")
+    if not raw:
+        return unknown(src, "tensorrt imported but exposes no __version__")
+    
+    result = {
+        "value": raw,
+        "source": src,
+        "status": "ok",
+        "line": major_minor(str(raw))
+    }
+    return result
+    
 
 
 def probe_l4t(env: Env) -> dict[str, Any]:
-    # write your code here
-    pass
+    src = "/etc/nv_tegra_release"
+
+    raw = read_text(env.root, src)
+    if not raw:
+        return unknown(src, "not a Jetson, or the L4T release file is absent")
+    
+    release = _L4T_RELEASE.search(new)
+    revision = _L4T_REVISION.search(raw)
+    if release is None or revision is None:
+        return unknown(src, f"release file present but unparseable: {raw.splitlines()[0][:80]}")
+    
+    version = f"{release.grou(1)}.{revision.group(1)}"
+
+    result = {
+        "value": version,
+        "source": src,
+        "status": "ok",
+        "line": major_minor(version),
+        "raw": raw.splitlines()[0]
+    }
+    return result
 
 ## for debugging - uncomment the following lines for debugging.
- if __name__ == "__main__":
-     env = Env.real()
-     out = probe_torch(env)
-     print(out)
+# if __name__ == "__main__":
+#     env = Env.real()
+#     out = probe_torch(env)
+#     print(out)
 
 # for generating system_report.json
 if __name__ == "__main__":
