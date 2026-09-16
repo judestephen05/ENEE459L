@@ -183,7 +183,7 @@ def probe_l4t(env: Env) -> dict[str, Any]:
     if not raw:
         return unknown(src, "not a Jetson, or the L4T release file is absent")
     
-    release = _L4T_RELEASE.search(new)
+    release = _L4T_RELEASE.search(raw)
     revision = _L4T_REVISION.search(raw)
     if release is None or revision is None:
         return unknown(src, f"release file present but unparseable: {raw.splitlines()[0][:80]}")
