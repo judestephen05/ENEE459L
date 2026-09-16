@@ -35,8 +35,60 @@ def _split_local_version(raw: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def probe_torch(env: Env) -> dict[str, Any]:
-    #write your code here
-    pass
+    src = "import torch"
+    try: 
+        torch = env.importer("torch")
+    except ModuleNotAvailable as e: 
+        return unknown(src, f"torch is not importable: {e}")
+    
+    raw = getattr_path(torch, "__version__")
+    if raw:
+        version = _split_local_version(str(raw))
+    else:
+        version = None
+    
+    available = getattr_path(torch, "cuda.is_available")
+    if callable(available):
+        cuda_available = bool(available())
+    else:
+        cuda_available = None
+
+
+    device = None
+    if cuda_available:
+        name = getattr_path(torch, "cuda.get_device_name")
+        if callable(name):
+            device = name(0)
+
+
+    result = {
+        "value": raw, 
+        "source": src, 
+        "status": "ok" if raw else "unknown", 
+        "version": version, 
+        "cuda_available": cuda_available, 
+        "cuda_version": getattr_path(torch, "version.cuda"), 
+        "device_name": device}
+
+    if not raw:
+        result["detail"] = "torch imported but exposes no __version__"
+        return result
+    
+    nv = version["nvidia_build"] if version else False
+    if cuda available:
+        result["diagnosis"] = "torch is installed and sees the GPU"
+    elif cuda_available is None:
+        result["diagnosis"] = "torch is installed but does not expose torch.cuda.is_available"
+    elif nv: 
+        result["diagnosis"] = ("this is an NVIDIA build but it cannot see the GPU, the wheel is right, "
+                                "so look at the driver stack, the container, or the user's groups, not at pip")
+    else:
+        result["diagnosis"] = ("this wheel has no NVIDIA local version tag and cannot see the GPU — "
+                            "it is almost certainly a stock PyPI wheel and must be replaced from the Jetson index")
+
+    return result
+    
+
 
 
 def probe_cuda(env: Env) -> dict[str, Any]:
@@ -59,10 +111,10 @@ def probe_l4t(env: Env) -> dict[str, Any]:
     pass
 
 ## for debugging - uncomment the following lines for debugging.
-# if __name__ == "__main__":
-    # env = Env.real()
-    # out = probe_l4t(env)
-#     print(out)
+ if __name__ == "__main__":
+     env = Env.real()
+     out = probe_torch(env)
+     print(out)
 
 # for generating system_report.json
 if __name__ == "__main__":
