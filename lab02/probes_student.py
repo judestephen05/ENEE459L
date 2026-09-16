@@ -76,7 +76,7 @@ def probe_torch(env: Env) -> dict[str, Any]:
         return result
     
     nv = version["nvidia_build"] if version else False
-    if cuda available:
+    if cuda_available:
         result["diagnosis"] = "torch is installed and sees the GPU"
     elif cuda_available is None:
         result["diagnosis"] = "torch is installed but does not expose torch.cuda.is_available"
