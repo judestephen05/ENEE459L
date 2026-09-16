@@ -188,7 +188,7 @@ def probe_l4t(env: Env) -> dict[str, Any]:
     if release is None or revision is None:
         return unknown(src, f"release file present but unparseable: {raw.splitlines()[0][:80]}")
     
-    version = f"{release.grou(1)}.{revision.group(1)}"
+    version = f"{release.group(1)}.{revision.group(1)}"
 
     result = {
         "value": version,
