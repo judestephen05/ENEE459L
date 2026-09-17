@@ -109,7 +109,7 @@ def probe_cuda(env: Env) -> dict[str, Any]:
         return unknown(src, "manifest present but names no cuda version")
     
     result = {
-        "value": raw,
+        "value": version,
         "source": src,
         "status": "ok",
         "line": major_minor(version)
@@ -138,7 +138,7 @@ def probe_opencv(env: Env) -> dict[str, Any]:
             detail = "the cv2.cuda namespace exists but reports no devices - this is a non-CUDA build"
     else:
         cuda_devices = None
-        detail = "no cv2.cuda namespace - a non-CUDA build, which is what JetPack ships"
+        detail = "no cv2.cuda namespace — a non-CUDA build, which is what JetPack ships"
     
     result = {
         "value": raw,
