@@ -207,7 +207,7 @@ def probe_power_state(bench: Bench) -> dict[str, Any]:
 
 
 def probe_telemetry(bench: Bench) -> dict[str, Any]:
-   base = Path(bench.telemetry) / THERMAL_ZONES
+    base = Path(bench.telemetry) / THERMAL_ZONES
     zones_read, hottest, hottest_dir = 0, None, None
     for zone_dir in sorted(base.glob("thermal_zone*")):
         raw_txt = _read_sysfs(zone_dir / "temp")
@@ -230,7 +230,7 @@ def probe_telemetry(bench: Bench) -> dict[str, Any]:
         zname = _read_sysfs(base / hottest_dir / "type")
         temperature = measured(round(hottest, 2), f"{THERMAL_ZONES}/*/temp",
                                zone=zname, zones_read=zones_read)
-    
+
     found = read_first(bench.telemetry, POWER_RAIL_CANDIDATES)
     if found is None:
         power = unknown(" | ".join(POWER_RAIL_CANDIDATES), "none of the documented INA3221 rail paths could be read")
