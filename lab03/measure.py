@@ -203,15 +203,18 @@ def probe_power_state(bench: Bench) -> dict[str, Any]:
 def probe_telemetry(bench: Bench) -> dict[str, Any]:
     base = Path(bench.telemetry) / THERMAL_ZONES
     zones_read, hottest, hottest_dir = 0, None, None
-    for zone_dir in sorted(base.glob("*")):
-        raw_txt = read_text(bench.telemetry, f"{THERMAL_ZONES}/{zone_dir.name}/temp")
+    for zone_dir in sorted(base.glob("thermal_zone")):
+        try:
+            raw_txt = read_text(bench.telemetry, f"{THERMAL_ZONES}/{zone_dir.name}/temp")
+        except Exception:
+            continue
         if raw_txt is None:
             continue
-        try: 
+        try:
             raw = int(raw_txt)
         except ValueError:
             continue
-        zones_read+=1
+        zones_read += 1
         if raw <= -1000:
             continue
         temp_c = raw / 1000.0
