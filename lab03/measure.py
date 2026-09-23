@@ -50,12 +50,6 @@ CPUFREQ_MIN = "sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq"
 CPUFREQ_MAX = "sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq"
 
 
-def _read_sysfs(path: Path) -> str | None:
-    try:
-        return path.read_bytes().decode("utf-8", "replace").strip("\x00").strip()
-    except OSError:
-        return None
-
 # ===========================================================================
 # 1. The loop
 # ===========================================================================
@@ -206,6 +200,13 @@ def probe_power_state(bench: Bench) -> dict[str, Any]:
     return measured(mode_name, result.source, mode_index=mode_index, jetson_clocks=jetson_clocks, jetson_clocks_source=clocks_src)
 
 
+def _read_sysfs(path: Path) -> str | None:
+    try:
+        return path.read_bytes().decode("utf-8", "replace").strip("\x00").strip()
+    except OSError:
+        return None
+
+
 def probe_telemetry(bench: Bench) -> dict[str, Any]:
     base = Path(bench.telemetry) / THERMAL_ZONES
     zones_read, hottest, hottest_dir = 0, None, None
@@ -233,20 +234,21 @@ def probe_telemetry(bench: Bench) -> dict[str, Any]:
 
     found = read_first(bench.telemetry, POWER_RAIL_CANDIDATES)
     if found is None:
-        power = unknown(" | ".join(POWER_RAIL_CANDIDATES), "none of the documented INA3221 rail paths could be read")
+        power = unknown(" | ".join(POWER_RAIL_CANDIDATES),
+                        "none of the documented INA3221 rail paths could be read")
     else:
         ppath, ptext = found
         power = measured(int(ptext), ppath)
-    
+
     found = read_first(bench.telemetry, GPU_LOAD_CANDIDATES)
     if found is None:
         gpu = unknown(" | ".join(GPU_LOAD_CANDIDATES), "no GPU load file found")
     else:
         gpath, gtext = found
-        gpu = measured(round(int(gtext) / 10.0, 1), gpath, units = "per-mille / 10")
+        gpu = measured(round(int(gtext) / 10.0, 1), gpath, units="per-mille / 10")
 
-    return {"temperature_c": temperature, "power_mw": power, "gpu_utilization_percent": gpu}
-
+    return {"temperature_c": temperature, "power_mw": power,
+            "gpu_utilization_percent": gpu}
 ## for debugging - uncomment the following lines for debugging.
 # if __name__ == "__main__":
     # env = Bench.real()
