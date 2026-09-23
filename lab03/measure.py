@@ -50,6 +50,12 @@ CPUFREQ_MIN = "sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq"
 CPUFREQ_MAX = "sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq"
 
 
+def _read_sysfs(path: Path) -> str | None:
+    try:
+        return path.read_bytes().decode("utf-8", "replace").strip("\x00").strip()
+    except OSError:
+        return None
+
 # ===========================================================================
 # 1. The loop
 # ===========================================================================
@@ -201,14 +207,11 @@ def probe_power_state(bench: Bench) -> dict[str, Any]:
 
 
 def probe_telemetry(bench: Bench) -> dict[str, Any]:
-    base = Path(bench.telemetry) / THERMAL_ZONES
+   base = Path(bench.telemetry) / THERMAL_ZONES
     zones_read, hottest, hottest_dir = 0, None, None
-    for zone_dir in sorted(base.glob("thermal_zone")):
-        try:
-            raw_txt = read_text(bench.telemetry, f"{THERMAL_ZONES}/{zone_dir.name}/temp")
-        except Exception:
-            continue
-        if raw_txt is None:
+    for zone_dir in sorted(base.glob("thermal_zone*")):
+        raw_txt = _read_sysfs(zone_dir / "temp")
+        if not raw_txt:
             continue
         try:
             raw = int(raw_txt)
@@ -224,7 +227,7 @@ def probe_telemetry(bench: Bench) -> dict[str, Any]:
     if hottest is None:
         temperature = unknown(f"{THERMAL_ZONES}/*/temp", "no readable thermal zones")
     else:
-        zname = read_text(bench.telemetry, f"{THERMAL_ZONES}/{hottest_dir}/type")
+        zname = _read_sysfs(base / hottest_dir / "type")
         temperature = measured(round(hottest, 2), f"{THERMAL_ZONES}/*/temp",
                                zone=zname, zones_read=zones_read)
     
