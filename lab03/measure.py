@@ -1,7 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
 
-import statistics, math
+import statistics, math, os
 from typing import Any
 
 from bench import Bench, measured, read_first, read_text, unknown
@@ -202,9 +202,18 @@ def probe_power_state(bench: Bench) -> dict[str, Any]:
 
 def _read_sysfs(path: Path) -> str | None:
     try:
-        return path.read_bytes().decode("utf-8", "replace").strip("\x00").strip()
+        fd = os.open(path, os.O_RDONLY)
     except OSError:
         return None
+    try:
+        data = os.read(fd, 4096)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    if not data:
+        return None
+    return data.decode("utf-8", "replace").strip("\x00").strip()
 
 
 def probe_telemetry(bench: Bench) -> dict[str, Any]:
@@ -249,6 +258,7 @@ def probe_telemetry(bench: Bench) -> dict[str, Any]:
 
     return {"temperature_c": temperature, "power_mw": power,
             "gpu_utilization_percent": gpu}
+
 ## for debugging - uncomment the following lines for debugging.
 # if __name__ == "__main__":
     # env = Bench.real()
