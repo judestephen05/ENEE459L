@@ -9,6 +9,8 @@ import time
 import json
 import numpy as np
 from pathlib import Path
+import statistics
+import math
 
 class FrameError(ValueError):
     """A shape or a format this module cannot price. `capture.py` exits 3."""
@@ -114,37 +116,109 @@ def grab_frame(pipeline: str, warmup_frames: int = 15) -> np.ndarray:
 ############################
 
 def frame_bytes(width: int, height: int, fmt: str) -> int:
-    pass
+    
+    if  not isinstance(width, int) or not isinstance(height, int) or width <= 0 or height <= 0:
+        raise FrameError("Width and height must be positive integers.")
 
+    bpp = _bytes_per_pixel(fmt)
+    total = width * height * bpp
+
+    return math.ceil(total)
 
 def bytes_per_second(width: int, height: int, fmt: str, fps: float) -> float:
-    pass
+    if fps <= 0:
+        raise FrameError("Frames per second must be positive.")
 
+    size = frame_bytes(width, height, fmt)
+    Bandwidth = size * fps
+
+    return float(Bandwidth)
 
 def frame_stats(pixels: Sequence[float] | Iterable[float]) -> dict[str, float]:
-    pass
+    values = [float(v) for v in pixels]
+    
+    if not values:
+        raise FrameError("No input pixels.")
+
+    vmin = min(values)
+    vmax = max(values)
+
+    N = len(values)
+    mean = 1/N * sum(values)
+
+    variance = 1/N * sum((v - mean) ** 2 for v in values)
+    sd = math.sqrt(variance)
+    spread = vmax - vmin
+
+    return {
+        "min": vmin,
+        "max": vmax,
+        "mean": mean,
+        "spread": spread,
+        "sd": sd,
+        "samples": N
+    }
 
 
 def classify(stats: dict[str, float]) -> tuple[str, str]:
-    pass
+    for key in ("max", "spread", "mean"):
+        if key not in stats:
+            raise FrameError(f"stats is missg {key!r}")
+    
+    if stats["max"] <= BLACK_MAX:
+        return ("black", "max at or below BLACK_MAX, sensor sees no light")
+    if stats["spread"] < FLAT_SPREAD:
+        return ("flat", "spread below FLAT_SPREAD, no contrast")
+    if stats["mean"] < 0.10:
+        return ("dark", "mean below 0.10, underexposed")
+    else:
+        return ("scene", "proper exposure and dynamic range")
 
 
 def conversion_bytes(width: int, height: int, src: str, dst: str) -> int:
-    pass
+    if src.lower() == dst.lower():
+        return 0
+    
+    read_vol = frame_bytes(width, height, src)
+    write_vol = frame_bytes(width, height, dst)
+    Traffic = read_vol + write_vol
+    return Traffic
 
 
 def resize_bytes(src_w: int, src_h: int, dst_w: int, dst_h: int,
                  fmt: str) -> int:
-    pass
+    src_size = frame_bytes(src_w, src_h, fmt)
+    frame_size = frame_bytes(dst_w, dst_h, fmt)
+    return src_size + frame_size
 
 
 def normalise_bytes(width: int, height: int, channels: int = 3,
                     out_bytes: int = 4) -> int:
-    pass
+    if width <= 0 or height <= 0 or channels <= 0:
+        raise FrameError("Width, height, and channels must be positive.")
 
+    P = width*height*channels
+
+    out = P * out_bytes
+    return P + out
 
 def summarise_formats(width: int, height: int) -> list[dict[str, Any]]:
-    pass
+    base = frame_bytes(width, height, "rgb")
+    rows = []
+    for fmt in FORMAT_NOTES:
+        N = frame_bytes(width, height, fmt)
+        bpp = _bytes_per_pixel(fmt)
+        ratio = N/base
+        note = FORMAT_NOTES[fmt]
+        rows.append({
+            "format": fmt,
+            "bytes_per_pixel": bpp,
+            "bytes": N,
+            "relative_to_rgb": ratio,
+            "note": note
+        })
+    return rows
+
 
 
 ###############################
@@ -164,7 +238,9 @@ def main(
 
     # 1. Capture frame from hardware
     pipeline_str = gstreamer_pipeline()
-    frame_bgr = grab_frame(pipeline_str)
+    frame_bgr = grab_frame(pipeline_str) ## set this equal to the path of teh downloaded image 
+
+    #have error check
 
     # 2. Save captured image to disk
     cv2.imwrite(str(img_path), frame_bgr)
